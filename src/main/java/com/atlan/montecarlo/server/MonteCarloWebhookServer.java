@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2025 Atlan Inc.
- */
+                                * Copyright (c) 2025 Atlan Inc.
+                                */
 package com.atlan.montecarlo.server;
 
 import java.io.IOException;
@@ -12,6 +12,7 @@ import com.atlan.montecarlo.service.KafkaProducerService;
 
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.protobuf.services.ProtoReflectionService;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 
@@ -27,6 +28,7 @@ public class MonteCarloWebhookServer {
     this.server =
         ServerBuilder.forPort(port)
             .addService(new MonteCarloWebhookServiceImpl(kafkaProducer))
+            .addService(ProtoReflectionService.newInstance())
             .build();
   }
 

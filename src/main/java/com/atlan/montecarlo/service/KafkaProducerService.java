@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2025 Atlan Inc.
- */
+                                * Copyright (c) 2025 Atlan Inc.
+                                */
 package com.atlan.montecarlo.service;
 
 import java.util.Properties;
@@ -23,6 +23,7 @@ public class KafkaProducerService implements AutoCloseable {
   private final JsonFormat.Printer jsonPrinter;
 
   public KafkaProducerService(String bootstrapServers, String topic, String deadLetterTopic) {
+    log.info("Initializing KafkaProducerService with bootstrap servers: {}", bootstrapServers);
     this.topic = topic;
     this.deadLetterTopic = deadLetterTopic;
     this.producer = createProducer(bootstrapServers);
@@ -32,10 +33,11 @@ public class KafkaProducerService implements AutoCloseable {
 
   private KafkaProducer<String, String> createProducer(String bootstrapServers) {
     Properties props = new Properties();
-    // Basic configuration
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
     props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
     props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+
+    log.debug("Creating Kafka producer with properties: {}", props);
 
     // Performance and reliability configurations
     props.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -43,11 +45,9 @@ public class KafkaProducerService implements AutoCloseable {
     props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, 1000);
     props.put(ProducerConfig.BATCH_SIZE_CONFIG, 16384);
     props.put(ProducerConfig.LINGER_MS_CONFIG, 1);
-    props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 33554432); // 32MB
+    props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 33554432);
     props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 60000);
     props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
-
-    // Idempotence configuration for exactly-once semantics
     props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
     props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
 

@@ -1,17 +1,16 @@
-FROM maven:3.9-eclipse-temurin-17 AS builder
+FROM eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
-COPY pom.xml .
-COPY src ./src
 
-# Build the application
-RUN mvn clean package -DskipTests
+# Create config directory
+RUN mkdir -p /app/config
 
-FROM eclipse-temurin:17-jre
+# Copy the pre-built JAR file and config
+COPY target/webhook-receiver-1.0-SNAPSHOT-jar-with-dependencies.jar app.jar
+COPY docker/config/application.yml /app/config/application.yml
 
-WORKDIR /app
-COPY --from=builder /app/target/webhook-receiver-1.0-SNAPSHOT.jar app.jar
+EXPOSE 8030
+EXPOSE 8080
 
-EXPOSE 9090
-
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run the application with the default config path
+ENTRYPOINT ["java", "-Dconfig.path=/app/config/application.yml", "-jar", "app.jar"]

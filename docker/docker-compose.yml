@@ -12,15 +12,13 @@ services:
       - "8080:8080"
     environment:
       JAVA_OPTS: "-Xms512m -Xmx1g -XX:+UseG1GC"
-    volumes:
-      - ./config:/app/config
     depends_on:
       - kafka
       - atlas
     networks:
       - atlan-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -50,13 +48,15 @@ services:
     image: bitnami/kafka:3.5
     container_name: kafka
     ports:
-      - "9092:9092"
+      - "9092:9092"   # Internal Kafka communication
+      - "29092:29092" # External Kafka access
     environment:
-      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_BROKER_ID: 1
+      KAFKA_CFG_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,EXTERNAL://:29092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:29092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes:
@@ -86,7 +86,7 @@ services:
     networks:
       - atlan-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:21000/api/atlas/admin/version"]
+      test: [ "CMD", "curl", "-f", "http://localhost:21000/api/atlas/admin/version" ]
       interval: 30s
       timeout: 10s
       retries: 3
