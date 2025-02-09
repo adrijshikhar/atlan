@@ -1,0 +1,12 @@
+server:
+  port: 8030
+  useTls: false
+
+kafka:
+  bootstrapServers: kafka:29092
+  mainTopic: monte-carlo-raw-events
+  deadLetterTopic: monte-carlo-dead-letter
+
+monitoring:
+  enabled: true
+  metricsPort: 8080

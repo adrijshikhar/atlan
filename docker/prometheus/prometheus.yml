@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'webhook-receiver'
+    static_configs:
+      - targets: ['webhook-receiver:8080']
+        labels:
+          application: 'webhook-receiver'
+
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9308']
+        labels:
+          service: 'kafka'
+
+  - job_name: 'atlas'
+    metrics_path: '/api/atlas/admin/metrics'
+    static_configs:
+      - targets: ['atlas:21000']
+        labels:
+          service: 'atlas'
