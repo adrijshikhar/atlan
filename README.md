@@ -14,7 +14,7 @@ cp config.yml.template config.yml
     - Using Maven:
       ```bash
       mvn clean package
-      java -Dconfig.path=config.yml -jar target/webhook-receiver-1.0-SNAPSHOT-jar-with-dependencies.jar
+      java -Dconfig.path=config.yml -jar target/webhook-receiver-1.0-SNAPSHOT.jar
       ```
     - Using IDE:
         - Add VM option: `-Dconfig.path=config.yml`
