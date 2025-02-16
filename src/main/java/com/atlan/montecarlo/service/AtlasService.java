@@ -1,23 +1,17 @@
-/*
- * Copyright (c) 2025 Atlan Inc.
- */
 package com.atlan.montecarlo.service;
 
 import java.util.*;
 import org.apache.atlas.AtlasClientV2;
 import org.apache.atlas.AtlasServiceException;
+import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.typedef.*;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.EntityMutationResponse;
-import org.apache.atlas.model.typedef.AtlasClassificationDef;
-import org.apache.atlas.model.typedef.AtlasEntityDef;
-import org.apache.atlas.model.typedef.AtlasStructDef;
-import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes;
-import org.apache.atlas.type.AtlasMapType;
 import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
@@ -40,8 +34,9 @@ public class AtlasService {
           new AtlasClientV2(
               configuration, new String[] {atlasUrl}, new String[] {username, password});
 
-      // Initialize required type definitions
+      // Initialize required type definitions and classifications
       initializeTypeDefinitions();
+      initializeClassifications();
 
       log.info("Successfully initialized Atlas client with URL: {}", atlasUrl);
     } catch (Exception e) {
@@ -52,7 +47,6 @@ public class AtlasService {
 
   private void initializeTypeDefinitions() throws Exception {
     try {
-      // Create entity type definitions
       List<AtlasEntityDef> entityDefs = new ArrayList<>();
 
       // Create Table type
@@ -62,7 +56,6 @@ public class AtlasService {
 
       AtlasStructDef.AtlasAttributeDef attrDef =
           AtlasTypeUtil.createRequiredAttrDef("qualifiedName", AtlasBaseTypeDef.ATLAS_TYPE_STRING);
-      attrDef.setIsOptional(false);
       attrDef.setIsUnique(true);
 
       tableDef.addAttribute(attrDef);
@@ -74,18 +67,38 @@ public class AtlasService {
           AtlasTypeUtil.createOptionalAttrDef("createTime", AtlasBaseTypeDef.ATLAS_TYPE_DATE));
       entityDefs.add(tableDef);
 
+      // Create MonteCarloAlert type
+      AtlasEntityDef alertDef = new AtlasEntityDef("MonteCarloAlert");
+      alertDef.addAttribute(
+          AtlasTypeUtil.createRequiredAttrDef("qualifiedName", AtlasBaseTypeDef.ATLAS_TYPE_STRING));
+      alertDef.addAttribute(
+          AtlasTypeUtil.createRequiredAttrDef("issueType", AtlasBaseTypeDef.ATLAS_TYPE_STRING));
+      alertDef.addAttribute(
+          AtlasTypeUtil.createRequiredAttrDef("severity", AtlasBaseTypeDef.ATLAS_TYPE_STRING));
+      alertDef.addAttribute(
+          AtlasTypeUtil.createRequiredAttrDef("createdTime", AtlasBaseTypeDef.ATLAS_TYPE_DATE));
+      alertDef.addAttribute(
+          AtlasTypeUtil.createOptionalAttrDef("resolvedTime", AtlasBaseTypeDef.ATLAS_TYPE_DATE));
+      alertDef.addAttribute(
+          AtlasTypeUtil.createOptionalAttrDef("status", AtlasBaseTypeDef.ATLAS_TYPE_STRING));
+
+      // Add relationship attribute to Table
+      AtlasStructDef.AtlasAttributeDef tableRef = new AtlasStructDef.AtlasAttributeDef();
+      tableRef.setName("table");
+      tableRef.setTypeName("Table");
+      tableRef.setIsOptional(false);
+      alertDef.addAttribute(tableRef);
+
+      entityDefs.add(alertDef);
+
       // Create the types definition
       AtlasTypesDef typesDef = new AtlasTypesDef();
       typesDef.setEntityDefs(entityDefs);
-
-      // Create Monte Carlo classification
-      createMonteCarloClassificationType();
 
       // Create the type definitions in Atlas
       atlasClient.createAtlasTypeDefs(typesDef);
       log.info("Successfully created Atlas type definitions");
     } catch (Exception e) {
-      // If types already exist, log and continue
       if (e.getMessage().contains("already exists")) {
         log.info("Atlas types already exist, continuing...");
       } else {
@@ -95,136 +108,187 @@ public class AtlasService {
     }
   }
 
-  public void updateTableMetadata(
+  private void initializeClassifications() throws Exception {
+    try {
+      // Create PII Classification
+      AtlasClassificationDef piiDef = new AtlasClassificationDef("PII");
+
+      // Create array of strings attribute for data elements using AtlasArrayType
+      AtlasStructDef.AtlasAttributeDef dataElementsAttr =
+          new AtlasStructDef.AtlasAttributeDef(
+              "dataElements", // attribute name
+              new AtlasArrayType(new AtlasBuiltInTypes.AtlasStringType())
+                  .getTypeName() // array of strings type
+              );
+
+      dataElementsAttr.setIsOptional(true);
+      piiDef.addAttribute(dataElementsAttr);
+      piiDef.addAttribute(
+          AtlasTypeUtil.createOptionalAttrDef("level", AtlasBaseTypeDef.ATLAS_TYPE_STRING));
+      piiDef.addAttribute(
+          AtlasTypeUtil.createOptionalAttrDef("lastUpdated", AtlasBaseTypeDef.ATLAS_TYPE_DATE));
+
+      AtlasTypesDef typesDef = new AtlasTypesDef();
+      typesDef.setClassificationDefs(Collections.singletonList(piiDef));
+
+      atlasClient.createAtlasTypeDefs(typesDef);
+      log.info("Successfully created PII classification");
+    } catch (Exception e) {
+      if (e.getMessage().contains("already exists")) {
+        log.info("PII classification already exists, continuing...");
+      } else {
+        log.error("Error creating PII classification", e);
+        throw e;
+      }
+    }
+  }
+
+  public void createAlertEntity(
       String tableId, String issueType, String severity, Map<String, Object> metadata) {
     try {
       if (tableId == null || tableId.trim().isEmpty()) {
         throw new IllegalArgumentException("tableId cannot be null or empty");
       }
-      if (issueType == null || issueType.trim().isEmpty()) {
-        throw new IllegalArgumentException("issueType cannot be null or empty");
-      }
-      if (severity == null || severity.trim().isEmpty()) {
-        throw new IllegalArgumentException("severity cannot be null or empty");
-      }
 
-      // Create or update the table entity
+      // Get or create the table entity first
       AtlasEntity.AtlasEntityWithExtInfo tableEntity = getOrCreateTableEntity(tableId);
 
-      // Add Monte Carlo classification
-      addMonteCarloClassification(tableEntity.getEntity().getGuid(), issueType, severity, metadata);
+      // Create alert entity
+      AtlasEntity alertEntity = new AtlasEntity("MonteCarloAlert");
+
+      // Generate a unique qualified name for the alert
+      String alertQualifiedName =
+          String.format("%s_%s_%d", tableId, issueType, System.currentTimeMillis());
+
+      alertEntity.setAttribute("qualifiedName", alertQualifiedName);
+      alertEntity.setAttribute("issueType", issueType);
+      alertEntity.setAttribute("severity", severity);
+      alertEntity.setAttribute("createdTime", new Date());
+      alertEntity.setAttribute("status", "ACTIVE");
+      alertEntity.setAttribute("table", AtlasTypeUtil.getAtlasObjectId(tableEntity.getEntity()));
+
+      if (metadata != null) {
+        alertEntity.setAttribute("metadata", metadata.toString());
+      }
+
+      // Create the alert entity
+      AtlasEntity.AtlasEntityWithExtInfo alertEntityInfo =
+          new AtlasEntity.AtlasEntityWithExtInfo(alertEntity);
+      EntityMutationResponse response = atlasClient.createEntity(alertEntityInfo);
+
+      log.info(
+          "Created new MonteCarloAlert entity with GUID: {}",
+          response.getFirstEntityCreated().getGuid());
 
     } catch (Exception e) {
-      log.error("Error updating Atlas metadata for table: {}", tableId, e);
-      throw new RuntimeException("Failed to update Atlas metadata", e);
+      log.error("Error creating alert entity for table: {}", tableId, e);
+      throw new RuntimeException("Failed to create alert entity", e);
+    }
+  }
+
+  public void applyPIIClassification(String tableId, List<String> dataElements, String level) {
+    try {
+      // Get or create the table entity first
+      AtlasEntity.AtlasEntityWithExtInfo tableEntity = getOrCreateTableEntity(tableId);
+
+      AtlasClassification classification = new AtlasClassification("PII");
+
+      Map<String, Object> attributes = new HashMap<>();
+      attributes.put("dataElements", dataElements);
+      attributes.put("level", level);
+      attributes.put("lastUpdated", new Date());
+      classification.setAttributes(attributes);
+
+      // Enable propagation through lineage
+      classification.setPropagate(true);
+
+      List<AtlasClassification> classifications = Collections.singletonList(classification);
+      atlasClient.addClassifications(tableEntity.getEntity().getGuid(), classifications);
+
+      log.info("Applied PII classification to table: {}", tableId);
+    } catch (Exception e) {
+      log.error("Error applying PII classification to table: {}", tableId, e);
+      throw new RuntimeException("Failed to apply PII classification", e);
     }
   }
 
   private AtlasEntity.AtlasEntityWithExtInfo getOrCreateTableEntity(String tableId)
       throws Exception {
     try {
-      // Debugging log
-      log.info("Searching for Table entity with qualifiedName: {}", tableId);
-
-      // Use a proper filter with a single attribute map
+      // Search for existing table entity
       Map<String, String> attributes = Collections.singletonMap("qualifiedName", tableId);
-      AtlasEntity.AtlasEntityWithExtInfo entitiesInfo =
+      AtlasEntity.AtlasEntityWithExtInfo entityInfo =
           atlasClient.getEntityByAttribute("Table", attributes);
 
-      if (entitiesInfo != null && entitiesInfo.getEntity() != null) {
-        log.info("Found Table entity with qualifiedName: {}", tableId);
-        return entitiesInfo;
+      if (entityInfo != null && entityInfo.getEntity() != null) {
+        log.info("Found existing Table entity with qualifiedName: {}", tableId);
+        return entityInfo;
       }
-    } catch (Exception ex) {
-      log.warn(
-          "Table entity not found for qualifiedName: {}. Proceeding to create a new one.", tableId);
+    } catch (Exception e) {
+      log.info("Table entity not found, will create new one: {}", tableId);
     }
 
-    try {
-      // Create new entity if not found
-      log.info("Creating new Table entity with qualifiedName: {}", tableId);
-      AtlasEntity entity = new AtlasEntity("Table");
-      entity.setAttribute("name", tableId);
-      entity.setAttribute("qualifiedName", tableId);
+    // Create new table entity if not found
+    AtlasEntity entity = new AtlasEntity("Table");
+    entity.setAttribute("name", tableId);
+    entity.setAttribute("qualifiedName", tableId);
+    entity.setAttribute("createTime", new Date());
 
-      AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo =
-          new AtlasEntity.AtlasEntityWithExtInfo(entity);
-      EntityMutationResponse response = atlasClient.createEntity(entityWithExtInfo);
-      AtlasEntityHeader entityHeader = response.getFirstEntityCreated();
+    AtlasEntity.AtlasEntityWithExtInfo entityInfo = new AtlasEntity.AtlasEntityWithExtInfo(entity);
+    EntityMutationResponse response = atlasClient.createEntity(entityInfo);
 
-      log.info("Successfully created Table entity with GUID: {}", entityHeader.getGuid());
-      return atlasClient.getEntityByGuid(entityHeader.getGuid());
-    } catch (AtlasServiceException e) {
-      log.error("Error creating Table entity with qualifiedName: {}", tableId, e);
-      throw new RuntimeException(e);
-    }
+    String guid = response.getFirstEntityCreated().getGuid();
+    log.info("Created new Table entity with GUID: {}", guid);
+
+    return atlasClient.getEntityByGuid(guid);
   }
 
-  private void addMonteCarloClassification(
-      String entityGuid, String issueType, String severity, Map<String, Object> metadata)
-      throws Exception {
+  public List<AtlasEntity> getTableAlerts(String tableId) throws AtlasServiceException {
+    List<AtlasEntity> alerts = new ArrayList<>();
+
     try {
-      AtlasClassification classification = new AtlasClassification("MonteCarloIssue");
+      // Get the table entity
+      Map<String, String> attributes = Collections.singletonMap("qualifiedName", tableId);
+      AtlasEntity.AtlasEntityWithExtInfo tableEntity =
+          atlasClient.getEntityByAttribute("Table", attributes);
 
-      Map<String, Object> attributes = new HashMap<>();
-      attributes.put("issueType", issueType);
-      attributes.put("severity", severity);
-      attributes.put("lastUpdated", new Date());
-      attributes.put("metadata", metadata);
-      classification.setAttributes(attributes);
+      if (tableEntity != null && tableEntity.getEntity() != null) {
+        // Query for all alerts related to this table
+        String dslQuery =
+            String.format(
+                "from MonteCarloAlert where table = '%s' order by createdTime desc",
+                tableEntity.getEntity().getGuid());
 
-      List<AtlasClassification> classifications = Collections.singletonList(classification);
-      atlasClient.addClassifications(entityGuid, classifications);
+        AtlasSearchResult result = atlasClient.dslSearch(dslQuery);
+
+        // Get full entity details for each alert
+        for (AtlasEntityHeader header : result.getEntities()) {
+          AtlasEntity.AtlasEntityWithExtInfo alertEntity =
+              atlasClient.getEntityByGuid(header.getGuid());
+          alerts.add(alertEntity.getEntity());
+        }
+      }
     } catch (Exception e) {
-      log.error("Error adding classification to entity: {}", entityGuid, e);
+      log.error("Error fetching alerts for table: {}", tableId, e);
       throw e;
     }
+
+    return alerts;
   }
 
-  public void createMonteCarloClassificationType() throws Exception {
+  public List<AtlasClassification> getTableClassifications(String tableId)
+      throws AtlasServiceException {
     try {
-      // Check if the classification already exists
-      AtlasClassificationDef existingDef =
-          atlasClient.getClassificationDefByName("MonteCarloIssue");
+      Map<String, String> attributes = Collections.singletonMap("qualifiedName", tableId);
+      AtlasEntity.AtlasEntityWithExtInfo tableEntity =
+          atlasClient.getEntityByAttribute("Table", attributes);
 
-      if (existingDef != null) {
-        log.info("MonteCarloIssue classification type already exists. Skipping creation.");
-        return;
+      if (tableEntity != null && tableEntity.getEntity() != null) {
+        return atlasClient.getClassifications(tableEntity.getEntity().getGuid()).getList();
       }
+      return Collections.emptyList();
     } catch (Exception e) {
-      log.info("MonteCarloIssue classification type does not exist. Proceeding with creation.");
-    }
-
-    try {
-      AtlasClassificationDef classificationDef = new AtlasClassificationDef("MonteCarloIssue");
-
-      List<AtlasStructDef.AtlasAttributeDef> attributeDefs = new ArrayList<>();
-
-      attributeDefs.add(
-          AtlasTypeUtil.createOptionalAttrDef(
-              "issueType", new AtlasBuiltInTypes.AtlasStringType()));
-      attributeDefs.add(
-          AtlasTypeUtil.createOptionalAttrDef("severity", new AtlasBuiltInTypes.AtlasStringType()));
-      attributeDefs.add(
-          AtlasTypeUtil.createOptionalAttrDef(
-              "lastUpdated", new AtlasBuiltInTypes.AtlasDateType()));
-      attributeDefs.add(
-          AtlasTypeUtil.createOptionalAttrDef(
-              "metadata",
-              new AtlasMapType(
-                  new AtlasBuiltInTypes.AtlasStringType(),
-                  new AtlasBuiltInTypes.AtlasStringType())));
-
-      classificationDef.setAttributeDefs(attributeDefs);
-
-      AtlasTypesDef typesDef = new AtlasTypesDef();
-      typesDef.setClassificationDefs(Collections.singletonList(classificationDef));
-
-      atlasClient.createAtlasTypeDefs(typesDef);
-
-      log.info("Successfully created MonteCarloIssue classification type");
-    } catch (Exception e) {
-      log.error("Error creating MonteCarloIssue classification type", e);
+      log.error("Error fetching classifications for table: {}", tableId, e);
       throw e;
     }
   }
