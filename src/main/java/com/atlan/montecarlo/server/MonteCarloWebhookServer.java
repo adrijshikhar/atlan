@@ -9,6 +9,8 @@ import com.atlan.montecarlo.service.KafkaProducerService;
 
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.health.v1.HealthCheckResponse;
+import io.grpc.protobuf.services.HealthStatusManager;
 import io.grpc.protobuf.services.ProtoReflectionService;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -17,18 +19,24 @@ import lombok.extern.slf4j.Slf4j;
 public class MonteCarloWebhookServer {
   private final int port;
   private final Server server;
+  private final HealthStatusManager healthManager;
 
   public MonteCarloWebhookServer(int port, KafkaProducerService kafkaProducer) {
     this.port = port;
+    this.healthManager = new HealthStatusManager();
+
     this.server =
         ServerBuilder.forPort(port)
             .addService(new MonteCarloWebhookServiceImpl(kafkaProducer))
+            .addService(healthManager.getHealthService()) // Add the health service
             .addService(ProtoReflectionService.newInstance())
             .build();
   }
 
   public void start() throws IOException {
     server.start();
+    // Set the service as healthy when the server starts
+    healthManager.setStatus("", HealthCheckResponse.ServingStatus.SERVING);
     log.info("Server started, listening on port {}", port);
 
     Runtime.getRuntime()
@@ -36,6 +44,8 @@ public class MonteCarloWebhookServer {
             new Thread(
                 () -> {
                   try {
+                    // Set service as not serving during shutdown
+                    healthManager.setStatus("", HealthCheckResponse.ServingStatus.NOT_SERVING);
                     MonteCarloWebhookServer.this.stop();
                   } catch (InterruptedException e) {
                     log.error("Error during server shutdown", e);
@@ -45,6 +55,7 @@ public class MonteCarloWebhookServer {
 
   public void stop() throws InterruptedException {
     if (server != null) {
+      healthManager.setStatus("", HealthCheckResponse.ServingStatus.NOT_SERVING);
       server.shutdown().awaitTermination(30, TimeUnit.SECONDS);
     }
   }

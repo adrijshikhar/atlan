@@ -4,10 +4,15 @@ server:
   useTls: false
 
 kafka:
-  bootstrapServers: kafka:29092  # Internal Kafka address using PLAINTEXT listener
+  bootstrapServers: kafka:9092  # Internal Kafka address using PLAINTEXT listener
   mainTopic: monte-carlo-raw-events
   deadLetterTopic: monte-carlo-dead-letter
 
 monitoring:
   enabled: true
   metricsPort: 8080
+
+atlas:
+  url: http://atlas:21000
+  username: admin
+  password: admin

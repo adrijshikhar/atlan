@@ -1,38 +1,21 @@
 services:
   # Application Service
-#  webhook-receiver:
-#    build:
-#      context: ..
-#      dockerfile: Dockerfile
-#      args:
-#        JAVA_VERSION: 17
-#    container_name: webhook-receiver
-#    ports:
-#      - "8030:8030"  # Restricting to localhost
-#      - "8080:8080"
-#    environment:
-#      JAVA_OPTS: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-#      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-#      ATLAS_REST_ADDRESS: https://atlas:21443
-#      ATLAS_USERNAME: admin
-#      ATLAS_PASSWORD: atlasAdmin123#
-#    depends_on:
-#      kafka:
-#        condition: service_healthy
-#      atlas:
-#        condition: service_healthy
-#    networks:
-#      - atlan-network
-#
-#    healthcheck:
-#      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-#      interval: 30s
-#      timeout: 10s
-#      retries: 3
-#      start_period: 40s
+  webhook-receiver:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: webhook-receiver
+    container_name: webhook-receiver
+    ports:
+      - "8030:8030"  # Restricting to localhost
+    depends_on:
+      kafka:
+        condition: service_healthy
+      atlas:
+        condition: service_healthy
+    networks:
+      - atlan-network
 
-
-  # Zookeeper
   zookeeper:
     image: bitnami/zookeeper:3.8.1
     container_name: zookeeper
@@ -53,14 +36,7 @@ services:
       - zookeeper_log:/bitnami/zookeeper/log
     networks:
       - atlan-network
-    healthcheck:
-      test: [ "CMD-SHELL", "echo stat | nc localhost 2181 || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
-
-  # Kafka
   kafka:
     image: bitnami/kafka:3.5.1
     container_name: kafka
@@ -85,20 +61,16 @@ services:
     volumes:
       - kafka_data:/bitnami/kafka
     depends_on:
-      zookeeper:
-        condition: service_healthy
+      - zookeeper
     networks:
       - atlan-network
-    
     healthcheck:
-      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1" ]
+      test: [ "CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092" ]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      timeout: 60s
+      retries: 30
+      start_period: 20s
 
-
-  # Apache Atlas
   atlas:
     image: sburn/apache-atlas:2.3.0
     container_name: atlas
@@ -153,8 +125,6 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      zookeeper:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -164,19 +134,13 @@ services:
           cpus: '2'
           memory: 4G
     healthcheck:
-      test: [ "CMD", "curl", "-f", "-k", "https://localhost:21443/api/atlas/admin/version" ]
+      test: [ "CMD", "wget", "--spider", "--header=Authorization: Basic YWRtaW46YWRtaW4=", "http://localhost:21000/api/atlas/v2/types/typedefs" ]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    ulimits:
-      nproc: 65535
-      nofile:
-        soft: 65535
-        hard: 65535
+      timeout: 60s
+      retries: 30
+      start_period: 240s
 
 
-  # Prometheus
   prometheus:
     image: prom/prometheus:v2.45.0
     container_name: prometheus
@@ -201,11 +165,6 @@ services:
         reservations:
           cpus: '0.5'
           memory: 1G
-    healthcheck:
-      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 
   # Grafana
@@ -226,8 +185,7 @@ services:
     networks:
       - atlan-network
     depends_on:
-      prometheus:
-        condition: service_healthy
+      - prometheus
     deploy:
       resources:
         limits:
@@ -236,19 +194,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
-    healthcheck:
-      test: [ "CMD-SHELL", "curl --fail http://localhost:3000/api/health || exit 1" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 
 networks:
   atlan-network:
     driver: bridge
     name: atlan-network
-    driver_opts:
-      com.docker.network.driver.mtu: 1450
 
 volumes:
   zookeeper_data:
