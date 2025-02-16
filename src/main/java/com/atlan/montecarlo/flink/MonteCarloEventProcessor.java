@@ -1,11 +1,8 @@
 package com.atlan.montecarlo.flink;
 
-import com.atlan.montecarlo.service.AtlasService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -16,8 +13,13 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 
-import java.util.Collections;
-import java.util.List;
+import com.atlan.montecarlo.service.AtlasService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class MonteCarloEventProcessor {
@@ -80,7 +82,7 @@ public class MonteCarloEventProcessor {
         String eventType = jsonNode.get("eventType").asText();
 
         MetadataUpdateEvent updateEvent = new MetadataUpdateEvent();
-        updateEvent.setEventType(eventType);
+        updateEvent.setEventType(MetadataUpdateEvent.EventType.valueOf(eventType));
 
         switch (eventType) {
           case "MONTE_CARLO_ALERT":
@@ -143,7 +145,7 @@ public class MonteCarloEventProcessor {
     public void invoke(MetadataUpdateEvent event, Context context) {
       try {
         switch (event.getEventType()) {
-          case "MONTE_CARLO_ALERT":
+          case MONTE_CARLO_ALERT -> {
             // Create alert entity
             atlasService.createAlertEntity(
                 event.getTableId(),
@@ -154,9 +156,8 @@ public class MonteCarloEventProcessor {
                 "Created Monte Carlo alert for table: {} with issue: {}",
                 event.getTableId(),
                 event.getIssueType());
-            break;
-
-          case "PII_CLASSIFICATION":
+          }
+          case PII_CLASSIFICATION -> {
             // Apply PII classification
             atlasService.applyPIIClassification(
                 event.getTableId(), event.getPiiElements(), event.getPiiLevel());
@@ -164,7 +165,7 @@ public class MonteCarloEventProcessor {
                 "Applied PII classification to table: {} with level: {}",
                 event.getTableId(),
                 event.getPiiLevel());
-            break;
+          }
         }
       } catch (Exception e) {
         log.error("Error updating Atlas: {}", e.getMessage(), e);
@@ -175,7 +176,7 @@ public class MonteCarloEventProcessor {
   @Data
   @NoArgsConstructor
   public static class MetadataUpdateEvent {
-    private String eventType;
+    private EventType eventType;
     private String tableId;
 
     // Monte Carlo alert fields
@@ -186,5 +187,10 @@ public class MonteCarloEventProcessor {
     // PII classification fields
     private String piiLevel;
     private List<String> piiElements;
+
+    enum EventType {
+      MONTE_CARLO_ALERT,
+      PII_CLASSIFICATION
+    }
   }
 }
