@@ -171,8 +171,13 @@ public class AtlasService {
 
       log.info("Applied PII classification to table: {}", tableId);
     } catch (Exception e) {
-      log.error("Error applying PII classification to table: {}", tableId, e);
-      throw new RuntimeException("Failed to apply PII classification", e);
+      // if already associated then just log
+      if (e.getMessage().contains("already associated")) {
+        log.info("PII classification already associated with table: {}", tableId);
+      } else {
+        log.error("Error applying PII classification to table: {}", tableId, e);
+        throw new RuntimeException("Failed to apply PII classification", e);
+      }
     }
   }
 

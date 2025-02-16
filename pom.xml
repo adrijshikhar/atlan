@@ -345,14 +345,6 @@
                         <importOrder>
                             <order>java,javax,org,com,</order>
                         </importOrder>
-
-                        <!-- License header -->
-                        <licenseHeader>
-                            <content>/*
-                                * Copyright (c) $YEAR Atlan Inc.
-                                */
-                            </content>
-                        </licenseHeader>
                     </java>
 
                 </configuration>

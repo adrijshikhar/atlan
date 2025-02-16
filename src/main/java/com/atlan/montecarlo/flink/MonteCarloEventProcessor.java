@@ -1,7 +1,11 @@
 package com.atlan.montecarlo.flink;
 
+import static com.atlan.montecarlo.flink.MonteCarloEventProcessor.MetadataUpdateEvent.EventType.MONTE_CARLO_ALERT;
+import static com.atlan.montecarlo.flink.MonteCarloEventProcessor.MetadataUpdateEvent.EventType.PII_CLASSIFICATION;
+
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.RichMapFunction;
@@ -14,8 +18,11 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 
 import com.atlan.montecarlo.service.AtlasService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategy;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -43,8 +50,15 @@ public class MonteCarloEventProcessor {
   }
 
   public void startProcessing() throws Exception {
-    StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    // Create the execution environment with the necessary configuration
+    Configuration flinkConfig = new Configuration();
+    flinkConfig.setString("taskmanager.memory.process.size", "1024m");
+    // set worker to one
+    flinkConfig.setInteger("parallelism.default", 1);
+    StreamExecutionEnvironment env =
+        StreamExecutionEnvironment.getExecutionEnvironment(flinkConfig);
 
+    // Configure Kafka source
     KafkaSource<String> source =
         KafkaSource.<String>builder()
             .setBootstrapServers(bootstrapServers)
@@ -72,45 +86,38 @@ public class MonteCarloEventProcessor {
 
     @Override
     public void open(Configuration parameters) {
-      objectMapper = new ObjectMapper();
+      objectMapper =
+          new ObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
     }
 
     @Override
     public MetadataUpdateEvent map(String value) throws Exception {
       try {
-        JsonNode jsonNode = objectMapper.readTree(value);
-        String eventType = jsonNode.get("eventType").asText();
+        JsonNode node = objectMapper.readTree(value);
+        log.info("Processing event: {}", node);
 
-        MetadataUpdateEvent updateEvent = new MetadataUpdateEvent();
-        updateEvent.setEventType(MetadataUpdateEvent.EventType.valueOf(eventType));
+        MetadataUpdateEvent event = new MetadataUpdateEvent();
+        event.setEventType(MetadataUpdateEvent.EventType.valueOf(node.get("eventType").asText()));
+        event.setTableId(node.get("tableId").asText());
 
-        switch (eventType) {
-          case "MONTE_CARLO_ALERT":
-            // Handle Monte Carlo alert event
-            updateEvent.setTableId(jsonNode.get("table_id").asText());
-            updateEvent.setIssueType(jsonNode.get("issue_type").asText());
-            updateEvent.setSeverity(jsonNode.get("severity").asText());
-            updateEvent.setMetadata(jsonNode.get("metadata").toString());
-            break;
-
-          case "PII_CLASSIFICATION":
-            // Handle PII classification event
-            updateEvent.setTableId(jsonNode.get("table_id").asText());
-            updateEvent.setPiiLevel(jsonNode.get("pii_level").asText());
-            updateEvent.setPiiElements(
+        if (MONTE_CARLO_ALERT.equals(event.getEventType())) {
+          event.setIssueType(node.get("issueType").asText());
+          event.setSeverity(node.get("severity").asText());
+          if (node.has("metadata")) {
+            event.setMetadata(
                 objectMapper.convertValue(
-                    jsonNode.get("pii_elements"),
-                    objectMapper
-                        .getTypeFactory()
-                        .constructCollectionType(List.class, String.class)));
-            break;
-
-          default:
-            log.warn("Unknown event type: {}", eventType);
-            return null;
+                    node.get("metadata"), new TypeReference<Map<String, Object>>() {}));
+          }
+        } else if (PII_CLASSIFICATION.equals(event.getEventType())) {
+          event.setPiiLevel(node.get("piiLevel").asText());
+          if (node.has("piiElements")) {
+            event.setPiiElements(
+                objectMapper.convertValue(
+                    node.get("piiElements"), new TypeReference<List<String>>() {}));
+          }
         }
 
-        return updateEvent;
+        return event;
       } catch (Exception e) {
         log.error("Error processing event: {}", value, e);
         throw e;
@@ -120,7 +127,6 @@ public class MonteCarloEventProcessor {
 
   @Slf4j
   private static class MonteCarloAtlasSink extends RichSinkFunction<MetadataUpdateEvent> {
-    private static final long serialVersionUID = 1L;
     private final String atlasUrl;
     private final String atlasUsername;
     private final String atlasPassword;
@@ -133,7 +139,7 @@ public class MonteCarloEventProcessor {
     }
 
     @Override
-    public void open(Configuration parameters) throws Exception {
+    public void open(Configuration parameters) {
       try {
         atlasService = new AtlasService(atlasUrl, atlasUsername, atlasPassword);
       } catch (Exception e) {
@@ -175,6 +181,7 @@ public class MonteCarloEventProcessor {
 
   @Data
   @NoArgsConstructor
+  @JsonNaming(PropertyNamingStrategy.SnakeCaseStrategy.class)
   public static class MetadataUpdateEvent {
     private EventType eventType;
     private String tableId;
@@ -182,7 +189,7 @@ public class MonteCarloEventProcessor {
     // Monte Carlo alert fields
     private String issueType;
     private String severity;
-    private String metadata;
+    private Map<String, Object> metadata;
 
     // PII classification fields
     private String piiLevel;

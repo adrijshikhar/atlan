@@ -1,6 +1,3 @@
-/*
-                                * Copyright (c) 2025 Atlan Inc.
-                                */
 package com.atlan.montecarlo.service;
 
 import java.util.Properties;
@@ -74,7 +71,8 @@ public class KafkaProducerService implements AutoCloseable {
       // Add custom headers
       record
           .headers()
-          .add("event_type", request.getIssueType().name().getBytes())
+          .add("event_type", request.getEventType().name().getBytes())
+          .add("issue_type", request.getIssueType().name().getBytes())
           .add("severity", request.getSeverity().name().getBytes())
           .add("tenant_id", request.getTenantId().getBytes());
 

@@ -2,60 +2,65 @@ syntax = "proto3";
 
 package com.atlan.montecarlo.grpc;
 
-option java_multiple_files = true;
-option java_package = "com.atlan.montecarlo.grpc";
-option java_outer_classname = "MonteCarloProto";
-
 import "google/protobuf/timestamp.proto";
 
-// Service definition
+option java_multiple_files = true;
+
 service MonteCarloWebhookService {
-    rpc ProcessWebhook (WebhookRequest) returns (WebhookResponse) {}
-    rpc StreamEvents (stream WebhookRequest) returns (stream WebhookResponse) {}
+  rpc ProcessWebhook(WebhookRequest) returns (WebhookResponse) {}
+  rpc StreamEvents(stream WebhookRequest) returns (stream WebhookResponse) {}
 }
 
-// Webhook request message
 message WebhookRequest {
-    string event_id = 1;
-    string table_id = 2;
-    IssueType issue_type = 3;
-    Severity severity = 4;
-    google.protobuf.Timestamp timestamp = 5;
-    map<string, string> metadata = 6;
-    string tenant_id = 7;
+  string event_id = 1;
+  string tenant_id = 2;
+  string table_id = 3;
+  EventType event_type = 4;
+
+  // Fields for Monte Carlo Alert
+  IssueType issue_type = 5;
+  Severity severity = 6;
+  map<string, string> metadata = 7;
+
+  // Fields for PII Classification
+  repeated string pii_elements = 8;
+  string pii_level = 9;
 }
 
-// Webhook response message
 message WebhookResponse {
-    string event_id = 1;
-    Status status = 2;
-    string message = 3;
-    google.protobuf.Timestamp processed_at = 4;
+  string event_id = 1;
+  Status status = 2;
+  string message = 3;
+  google.protobuf.Timestamp processed_at = 4;
 }
 
-// Issue types
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  MONTE_CARLO_ALERT = 1;
+  PII_CLASSIFICATION = 2;
+}
+
 enum IssueType {
-    UNKNOWN = 0;
-    FRESHNESS = 1;
-    VOLUME = 2;
-    SCHEMA = 3;
-    QUALITY = 4;
-    PERFORMANCE = 5;
+  ISSUE_TYPE_UNKNOWN = 0;
+  FRESHNESS_ANOMALY = 1;
+  VOLUME_ANOMALY = 2;
+  SCHEMA_CHANGE = 3;
+  NULL_VALUE_ANOMALY = 4;
+  DISTRIBUTION_ANOMALY = 5;
+  CUSTOM_METRIC = 6;
 }
 
-// Severity levels
 enum Severity {
-    UNDEFINED = 0;
-    CRITICAL = 1;
-    HIGH = 2;
-    MEDIUM = 3;
-    LOW = 4;
+  SEVERITY_UNDEFINED = 0;
+  HIGH = 1;
+  MEDIUM = 2;
+  LOW = 3;
 }
 
-// Processing status
 enum Status {
-    UNSPECIFIED = 0;
-    SUCCESS = 1;
-    ERROR = 2;
-    VALIDATION_FAILED = 3;
+  STATUS_UNSPECIFIED = 0;
+  SUCCESS = 1;
+  ERROR = 2;
+  VALIDATION_FAILED = 3;
+  PROCESSING = 4;
 }

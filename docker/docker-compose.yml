@@ -253,13 +253,19 @@ networks:
 volumes:
   zookeeper_data:
     driver: local
+    name: atlan-zookeeper-data
   zookeeper_log:
     driver: local
+    name: atlan-zookeeper-log
   kafka_data:
     driver: local
+    name: atlan-kafka-data
   atlas_data:
     driver: local
+    name: atlan-atlas-data
   prometheus_data:
     driver: local
+    name: atlan-prometheus-data
   grafana_data:
     driver: local
+    name: atlan-grafana-data

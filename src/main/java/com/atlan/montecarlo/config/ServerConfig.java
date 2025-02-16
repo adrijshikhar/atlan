@@ -1,6 +1,3 @@
-/*
-                                * Copyright (c) 2025 Atlan Inc.
-                                */
 package com.atlan.montecarlo.config;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;

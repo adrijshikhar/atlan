@@ -1,6 +1,3 @@
-/*
-                                * Copyright (c) 2025 Atlan Inc.
-                                */
 package com.atlan.montecarlo.server;
 
 import java.io.IOException;
@@ -20,11 +17,9 @@ import lombok.extern.slf4j.Slf4j;
 public class MonteCarloWebhookServer {
   private final int port;
   private final Server server;
-  private final KafkaProducerService kafkaProducer;
 
   public MonteCarloWebhookServer(int port, KafkaProducerService kafkaProducer) {
     this.port = port;
-    this.kafkaProducer = kafkaProducer;
     this.server =
         ServerBuilder.forPort(port)
             .addService(new MonteCarloWebhookServiceImpl(kafkaProducer))
@@ -35,6 +30,7 @@ public class MonteCarloWebhookServer {
   public void start() throws IOException {
     server.start();
     log.info("Server started, listening on port {}", port);
+
     Runtime.getRuntime()
         .addShutdownHook(
             new Thread(
@@ -71,37 +67,31 @@ public class MonteCarloWebhookServer {
     @Override
     public void processWebhook(
         WebhookRequest request, StreamObserver<WebhookResponse> responseObserver) {
-      log.info("Received webhook request for event: {}", request.getEventId());
+      String requestId = request.getEventId();
+      log.info("Received webhook request: {}", requestId);
 
       try {
-        // Validate request
-        if (!validateRequest(request)) {
-          sendErrorResponse(request, responseObserver, Status.VALIDATION_FAILED, "Invalid request");
+        ValidationResult validation = validateRequest(request);
+        if (!validation.isValid()) {
+          sendErrorResponse(
+              request,
+              responseObserver,
+              Status.VALIDATION_FAILED,
+              String.format("Invalid request: %s", validation.getMessage()));
           return;
         }
 
-        // Send to Kafka
         kafkaProducer.sendEvent(request);
+        sendSuccessResponse(request, responseObserver);
 
-        // Send success response
-        WebhookResponse response =
-            WebhookResponse.newBuilder()
-                .setEventId(request.getEventId())
-                .setStatus(Status.SUCCESS)
-                .setMessage("Event processed successfully")
-                .setProcessedAt(
-                    com.google.protobuf.Timestamp.newBuilder()
-                        .setSeconds(Instant.now().getEpochSecond())
-                        .setNanos(Instant.now().getNano())
-                        .build())
-                .build();
-
-        responseObserver.onNext(response);
-        responseObserver.onCompleted();
-
+        log.info("Successfully processed webhook request: {}", requestId);
       } catch (Exception e) {
-        log.error("Error processing webhook request", e);
-        sendErrorResponse(request, responseObserver, Status.ERROR, "Internal server error");
+        log.error("Error processing webhook request: {}", requestId, e);
+        sendErrorResponse(
+            request, responseObserver, Status.ERROR, "Internal server error: " + e.getMessage());
+      } finally {
+        // Complete the response stream
+        responseObserver.onCompleted();
       }
     }
 
@@ -111,18 +101,31 @@ public class MonteCarloWebhookServer {
       return new StreamObserver<>() {
         @Override
         public void onNext(WebhookRequest request) {
-          log.info("Received streaming event: {}", request.getEventId());
+          String requestId = request.getEventId();
+          log.info("Received streaming event: {}", requestId);
+
           try {
-            if (validateRequest(request)) {
-              kafkaProducer.sendEvent(request);
-              sendSuccessResponse(request, responseObserver);
-            } else {
+            ValidationResult validation = validateRequest(request);
+            if (!validation.isValid()) {
               sendErrorResponse(
-                  request, responseObserver, Status.VALIDATION_FAILED, "Invalid request");
+                  request,
+                  responseObserver,
+                  Status.VALIDATION_FAILED,
+                  String.format("Invalid request: %s", validation.getMessage()));
+              return;
             }
+
+            kafkaProducer.sendEvent(request);
+            sendSuccessResponse(request, responseObserver);
+
+            log.info("Successfully processed streaming event: {}", requestId);
           } catch (Exception e) {
-            log.error("Error processing streaming event", e);
-            sendErrorResponse(request, responseObserver, Status.ERROR, "Internal server error");
+            log.error("Error processing streaming event: {}", requestId, e);
+            sendErrorResponse(
+                request,
+                responseObserver,
+                Status.ERROR,
+                "Internal server error: " + e.getMessage());
           }
         }
 
@@ -138,16 +141,36 @@ public class MonteCarloWebhookServer {
       };
     }
 
-    private boolean validateRequest(WebhookRequest request) {
-      return request != null
-          && request.getEventId() != null
-          && !request.getEventId().isEmpty()
-          && request.getTableId() != null
-          && !request.getTableId().isEmpty()
-          && request.getTenantId() != null
-          && !request.getTenantId().isEmpty()
-          && request.getIssueType() != IssueType.UNKNOWN
-          && request.getSeverity() != Severity.UNDEFINED;
+    private ValidationResult validateRequest(WebhookRequest request) {
+      if (request == null) {
+        return new ValidationResult(false, "Request cannot be null");
+      }
+
+      if (isNullOrEmpty(request.getEventId())) {
+        return new ValidationResult(false, "Event ID is required");
+      }
+
+      if (isNullOrEmpty(request.getTableId())) {
+        return new ValidationResult(false, "Table ID is required");
+      }
+
+      if (isNullOrEmpty(request.getTenantId())) {
+        return new ValidationResult(false, "Tenant ID is required");
+      }
+
+      if (request.getIssueType() == IssueType.UNRECOGNIZED) {
+        return new ValidationResult(false, "Valid issue type is required");
+      }
+
+      if (request.getSeverity() == Severity.UNRECOGNIZED) {
+        return new ValidationResult(false, "Valid severity level is required");
+      }
+
+      return new ValidationResult(true, null);
+    }
+
+    private boolean isNullOrEmpty(String str) {
+      return str == null || str.trim().isEmpty();
     }
 
     private void sendSuccessResponse(
@@ -157,12 +180,9 @@ public class MonteCarloWebhookServer {
               .setEventId(request.getEventId())
               .setStatus(Status.SUCCESS)
               .setMessage("Event processed successfully")
-              .setProcessedAt(
-                  com.google.protobuf.Timestamp.newBuilder()
-                      .setSeconds(Instant.now().getEpochSecond())
-                      .setNanos(Instant.now().getNano())
-                      .build())
+              .setProcessedAt(getCurrentTimestamp())
               .build();
+
       responseObserver.onNext(response);
     }
 
@@ -176,16 +196,39 @@ public class MonteCarloWebhookServer {
               .setEventId(request.getEventId())
               .setStatus(status)
               .setMessage(message)
-              .setProcessedAt(
-                  com.google.protobuf.Timestamp.newBuilder()
-                      .setSeconds(Instant.now().getEpochSecond())
-                      .setNanos(Instant.now().getNano())
-                      .build())
+              .setProcessedAt(getCurrentTimestamp())
               .build();
+
       responseObserver.onNext(response);
       if (status != Status.SUCCESS) {
         responseObserver.onCompleted();
       }
+    }
+
+    private com.google.protobuf.Timestamp getCurrentTimestamp() {
+      Instant now = Instant.now();
+      return com.google.protobuf.Timestamp.newBuilder()
+          .setSeconds(now.getEpochSecond())
+          .setNanos(now.getNano())
+          .build();
+    }
+  }
+
+  private static class ValidationResult {
+    private final boolean valid;
+    private final String message;
+
+    ValidationResult(boolean valid, String message) {
+      this.valid = valid;
+      this.message = message;
+    }
+
+    public boolean isValid() {
+      return valid;
+    }
+
+    public String getMessage() {
+      return message;
     }
   }
 }
