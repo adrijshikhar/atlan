@@ -1,75 +1,102 @@
-version: '3.8'
-
 services:
   # Application Service
-  webhook-receiver:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    container_name: webhook-receiver
-    ports:
-      - "8030:8030"
-      - "8080:8080"
-    environment:
-      JAVA_OPTS: "-Xms512m -Xmx1g -XX:+UseG1GC"
-    depends_on:
-      - kafka
-      - atlas
-    networks:
-      - atlan-network
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+#  webhook-receiver:
+#    build:
+#      context: ..
+#      dockerfile: Dockerfile
+#      args:
+#        JAVA_VERSION: 17
+#    container_name: webhook-receiver
+#    ports:
+#      - "8030:8030"  # Restricting to localhost
+#      - "8080:8080"
+#    environment:
+#      JAVA_OPTS: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+#      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+#      ATLAS_REST_ADDRESS: https://atlas:21443
+#      ATLAS_USERNAME: admin
+#      ATLAS_PASSWORD: atlasAdmin123#
+#    depends_on:
+#      kafka:
+#        condition: service_healthy
+#      atlas:
+#        condition: service_healthy
+#    networks:
+#      - atlan-network
+#
+#    healthcheck:
+#      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 40s
+
 
   # Zookeeper
   zookeeper:
-    image: zookeeper:3.8
+    image: bitnami/zookeeper:3.8.1
     container_name: zookeeper
     ports:
       - "2181:2181"
     environment:
-      ZOO_MY_ID: 1
-      ZOO_PORT: 2181
+      ZOO_SERVER_ID: 1
+      ZOO_SERVERS: server.1=zookeeper:2888:3888
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOO_MAX_CLIENT_CNXNS: 100
+      ZOO_MIN_SESSION_TIMEOUT: 4000
+      ZOO_MAX_SESSION_TIMEOUT: 40000
+      ZOO_AUTOPURGE_SNAPRETAINCOUNT: 3
+      ZOO_AUTOPURGE_PURGEINTERVAL: 1
+      JVMFLAGS: "-Xms512m -Xmx1g -XX:+UseG1GC"
     volumes:
-      - zookeeper_data:/data
-      - zookeeper_log:/datalog
+      - zookeeper_data:/bitnami/zookeeper/data
+      - zookeeper_log:/bitnami/zookeeper/log
     networks:
       - atlan-network
     healthcheck:
-      test: echo stat | nc localhost 2181
+      test: [ "CMD-SHELL", "echo stat | nc localhost 2181 || exit 1" ]
       interval: 10s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+
 
   # Kafka
   kafka:
-    image: bitnami/kafka:3.5
+    image: bitnami/kafka:3.5.1
     container_name: kafka
     ports:
-      - "9092:9092"   # Internal Kafka communication
-      - "29092:29092" # External Kafka access
+      - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_CFG_ZOOKEEPER_CONNECT: "zookeeper:2181"
-      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,EXTERNAL://:29092"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:29092"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: 3
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168
+      KAFKA_CFG_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_HEAP_OPTS: "-Xms1g -Xmx2g"
+      KAFKA_CFG_LOG_CLEANER_ENABLE: "true"
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes:
       - kafka_data:/bitnami/kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     networks:
       - atlan-network
+    
     healthcheck:
-      test: kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1
+      test: [ "CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+
 
   # Apache Atlas
   atlas:
@@ -77,61 +104,162 @@ services:
     container_name: atlas
     ports:
       - "21000:21000"
+      - "21443:21443"
     environment:
-      - ATLAS_PROVISION_EXAMPLES=false
-      - ATLAS_SERVER_BIND_ADDRESS=0.0.0.0
-      - ATLAS_SERVER_HOST=atlas
+      # Basic Configuration
+      ATLAS_SERVER_BIND_ADDRESS: 0.0.0.0
+      ATLAS_SERVER_HOST: atlas
+      ATLAS_SERVER_HTTPS_PORT: 21443
+      ATLAS_PROVISION_EXAMPLES: "false"
+      
+      # Authentication Configuration
+      ATLAS_AUTHENTICATION_METHOD: file
+      ATLAS_AUTHENTICATION_KEYTAB: ""
+      ATLAS_ADMIN_PASSWORD: atlasAdmin123#
+      
+      # SSL Configuration
+      ATLAS_SERVER_HTTPS_ENABLED: "true"
+      ATLAS_SSL_ENABLED: "true"
+      
+      # Memory Configuration
+      ATLAS_SERVER_OPTS: "-server -XX:SoftRefLRUPolicyMSPerMB=0 -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Xms2g -Xmx4g"
+      
+      # Search Configuration
+      ATLAS_SEARCH_MAX_LIMIT: 10000
+      ATLAS_SEARCH_DEFAULT_LIMIT: 100
+      
+      # Notification Configuration
+      ATLAS_NOTIFICATION_EMBEDDED: "false"
+      ATLAS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ATLAS_KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      
+      # Graph Database Configuration
+      ATLAS_GRAPH_STORAGE_BACKEND: hbase
+      ATLAS_GRAPH_STORAGE_HOSTNAME: localhost
+      
+      # Audit Configuration
+      ATLAS_AUDIT_ENABLED: "true"
+      
+      # Cache Configuration
+      ATLAS_CACHE_ENABLED: "true"
+      ATLAS_CACHE_SIZE: 10000
     volumes:
       - atlas_data:/var/lib/atlas
+      - ./atlas/conf:/opt/atlas/conf
+      - ./atlas/logs:/opt/atlas/logs
+      - ./atlas/data:/opt/atlas/data
     networks:
       - atlan-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      zookeeper:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:21000/api/atlas/admin/version" ]
+      test: [ "CMD", "curl", "-f", "-k", "https://localhost:21443/api/atlas/admin/version" ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 65535
+        hard: 65535
 
-  # Prometheus for metrics
+
+  # Prometheus
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.45.0
     container_name: prometheus
     ports:
       - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     networks:
       - atlan-network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Grafana for visualization
+
+  # Grafana
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.1.0
     container_name: grafana
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: localhost
+      GF_SMTP_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
     networks:
       - atlan-network
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail http://localhost:3000/api/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 
 networks:
   atlan-network:
     driver: bridge
+    name: atlan-network
+    driver_opts:
+      com.docker.network.driver.mtu: 1450
 
 volumes:
   zookeeper_data:
+    driver: local
   zookeeper_log:
+    driver: local
   kafka_data:
+    driver: local
   atlas_data:
+    driver: local
   prometheus_data:
+    driver: local
   grafana_data:
+    driver: local

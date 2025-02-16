@@ -40,3 +40,4 @@ build/
 .idea
 
 config.yml
+dependency-reduced-pom.xml

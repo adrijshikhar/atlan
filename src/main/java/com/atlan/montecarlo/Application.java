@@ -1,15 +1,19 @@
+/*
+                                * Copyright (c) 2025 Atlan Inc.
+                                */
 package com.atlan.montecarlo;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import com.atlan.montecarlo.config.ConfigurationLoader;
 import com.atlan.montecarlo.config.ServerConfig;
 import com.atlan.montecarlo.flink.MonteCarloEventProcessor;
 import com.atlan.montecarlo.server.MonteCarloWebhookServer;
 import com.atlan.montecarlo.service.KafkaProducerService;
-import lombok.extern.slf4j.Slf4j;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class Application {
