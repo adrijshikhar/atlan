@@ -4,9 +4,9 @@
 
 1. Create local configuration:
 
-```bash
-cp config.yml.template config.yml
-```
+    ```bash
+    cp config.yml.template config.yml
+    ```
 
 2. Edit `config.yml` with your local settings
 
